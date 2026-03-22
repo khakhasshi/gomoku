@@ -9,6 +9,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const BOARD_SIZE = 15;
 const ROOM_ID_LENGTH = 6;
 const RECONNECT_GRACE_MS = 30000;
+const MAX_CHAT_MESSAGES = 100;
 const PLAYER_NAMES = {
   jiang: '江景哲',
   yi: '易诗雨'
@@ -29,6 +30,10 @@ function formatTimestamp(date = new Date()) {
 
 function logMove(room, player, row, col, stone, timestamp) {
   console.log(`[${timestamp}] room=${room.id} player=${player.name} stone=${stone} move=(${row},${col}) totalMoves=${room.moves.length + 1}`);
+}
+
+function logChat(room, playerName, text, timestamp) {
+  console.log(`[${timestamp}] room=${room.id} chat=${playerName}: ${text}`);
 }
 
 function normalizePlayerName(name) {
@@ -86,6 +91,7 @@ function createRoom(hostSocket, hostName) {
     turn: 'black',
     winner: null,
     moves: [],
+    chatMessages: [],
     createdAt: Date.now(),
     rematchVotes: new Set()
   };
@@ -104,6 +110,7 @@ function serializeRoom(room) {
     turn: room.turn,
     winner: room.winner,
     moves: room.moves,
+    chatMessages: room.chatMessages,
     players: room.players.map((player) => ({
       id: player.id,
       name: player.name,
@@ -261,6 +268,23 @@ function resetRoom(room) {
   room.winner = null;
   room.moves = [];
   room.rematchVotes.clear();
+}
+
+function addChatMessage(room, playerName, text) {
+  const timestamp = formatTimestamp();
+  const message = {
+    id: crypto.randomUUID(),
+    playerName,
+    text,
+    timestamp
+  };
+
+  room.chatMessages.push(message);
+  if (room.chatMessages.length > MAX_CHAT_MESSAGES) {
+    room.chatMessages = room.chatMessages.slice(-MAX_CHAT_MESSAGES);
+  }
+
+  logChat(room, playerName, text, timestamp);
 }
 
 function notifyRoomState(room, message) {
@@ -493,6 +517,24 @@ wss.on('connection', (socket) => {
       } else {
         notifyRoomState(room, `${currentPlayer.name} 请求再来一局。`);
       }
+      return;
+    }
+
+    if (type === 'chat:send') {
+      const text = String(payload.text || '').trim().slice(0, 300);
+
+      if (!currentPlayer) {
+        send(socket, 'system:error', { message: '你还不在房间内。' });
+        return;
+      }
+
+      if (!text) {
+        send(socket, 'system:error', { message: '消息不能为空。' });
+        return;
+      }
+
+      addChatMessage(room, currentPlayer.name, text);
+      notifyRoomState(room);
     }
   });
 

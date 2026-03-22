@@ -52,29 +52,47 @@
       </aside>
 
       <main class="panel board-panel">
-        <section class="meta-strip">
-          <div class="meta-card">
-            <span>江景哲 · 藏青色</span>
-            <strong id="blackPlayer">等待加入</strong>
-          </div>
-          <div class="meta-card">
-            <span>易诗雨 · 粉色</span>
-            <strong id="whitePlayer">等待加入</strong>
-          </div>
-          <div class="meta-card">
-            <span>轮到</span>
-            <strong id="turnDisplay">--</strong>
-          </div>
-        </section>
+        <div class="play-layout">
+          <section class="game-column">
+            <section class="meta-strip">
+              <div class="meta-card">
+                <span>江景哲 · 藏青色</span>
+                <strong id="blackPlayer">等待加入</strong>
+              </div>
+              <div class="meta-card">
+                <span>易诗雨 · 粉色</span>
+                <strong id="whitePlayer">等待加入</strong>
+              </div>
+              <div class="meta-card">
+                <span>轮到</span>
+                <strong id="turnDisplay">--</strong>
+              </div>
+            </section>
 
-        <section class="board-wrapper">
-          <div id="board" class="board" aria-label="五子棋棋盘"></div>
-        </section>
+            <section class="board-wrapper">
+              <div id="board" class="board" aria-label="五子棋棋盘"></div>
+            </section>
 
-        <section class="footer-actions">
-          <button id="rematchButton" class="primary light">再来一局</button>
-          <button id="leaveRoomButton" class="secondary light">离开房间</button>
-        </section>
+            <section class="footer-actions">
+              <button id="rematchButton" class="primary light">再来一局</button>
+              <button id="leaveRoomButton" class="secondary light">离开房间</button>
+            </section>
+          </section>
+
+          <aside class="chat-panel">
+            <div class="chat-header">
+              <span>聊天窗口</span>
+              <strong id="chatStatus">进入房间后可聊天</strong>
+            </div>
+
+            <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+
+            <div class="chat-composer">
+              <input id="chatInput" maxlength="300" placeholder="发送一条消息..." />
+              <button id="chatSendButton" class="primary" type="button">发送</button>
+            </div>
+          </aside>
+        </div>
       </main>
     </div>
 

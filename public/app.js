@@ -12,6 +12,10 @@ const messageDisplay = document.getElementById('messageDisplay');
 const blackPlayer = document.getElementById('blackPlayer');
 const whitePlayer = document.getElementById('whitePlayer');
 const turnDisplay = document.getElementById('turnDisplay');
+const chatStatus = document.getElementById('chatStatus');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const chatSendButton = document.getElementById('chatSendButton');
 const toast = document.getElementById('toast');
 const STORAGE_KEYS = {
   identity: 'gomoku.identity',
@@ -99,6 +103,88 @@ function getMyPlayer() {
 
 function getLastMove() {
   return state.room?.moves?.length ? state.room.moves[state.room.moves.length - 1] : null;
+}
+
+function formatChatTime(timestamp) {
+  if (!timestamp) {
+    return '--:--';
+  }
+
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function renderChat() {
+  const room = state.room;
+  const myName = getDisplayName();
+  const messages = room?.chatMessages || [];
+
+  chatMessages.innerHTML = '';
+
+  if (!room) {
+    chatStatus.textContent = '进入房间后可聊天';
+    chatInput.disabled = true;
+    chatSendButton.disabled = true;
+
+    const empty = document.createElement('div');
+    empty.className = 'chat-empty';
+    empty.textContent = '创建或加入房间后，就可以聊天啦。';
+    chatMessages.appendChild(empty);
+    return;
+  }
+
+  chatInput.disabled = false;
+  chatSendButton.disabled = false;
+  chatStatus.textContent = room.status === 'paused' ? '对局暂停中，聊天仍可用' : `房间 ${room.id}`;
+
+  if (!messages.length) {
+    const empty = document.createElement('div');
+    empty.className = 'chat-empty';
+    empty.textContent = '还没有聊天消息，先打个招呼吧。';
+    chatMessages.appendChild(empty);
+    return;
+  }
+
+  messages.forEach((message) => {
+    const item = document.createElement('div');
+    const head = document.createElement('div');
+    const name = document.createElement('span');
+    const time = document.createElement('time');
+    const bubble = document.createElement('div');
+    const isMine = message.playerName === myName;
+
+    item.className = `chat-message${isMine ? ' mine' : ''}`;
+    head.className = 'chat-message-head';
+    bubble.className = 'chat-bubble';
+
+    name.textContent = message.playerName;
+    time.textContent = formatChatTime(message.timestamp);
+    bubble.textContent = message.text;
+
+    head.append(name, time);
+    item.append(head, bubble);
+    chatMessages.appendChild(item);
+  });
+
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function sendChatMessage() {
+  const text = chatInput.value.trim();
+
+  if (!state.room) {
+    showToast('请先创建或加入房间');
+    return;
+  }
+
+  if (!text) {
+    return;
+  }
+
+  send('chat:send', { text });
+  chatInput.value = '';
 }
 
 function renderBoard() {
@@ -192,6 +278,7 @@ function renderRoom() {
   }
 
   renderBoard();
+  renderChat();
 }
 
 function connect() {
@@ -283,6 +370,18 @@ copyRoomButton.addEventListener('click', async () => {
   }
 });
 
+chatSendButton.addEventListener('click', () => {
+  triggerHaptics(8);
+  sendChatMessage();
+});
+
+chatInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    sendChatMessage();
+  }
+});
+
 rematchButton.addEventListener('click', () => {
   triggerHaptics(8);
   send('game:rematch');
@@ -296,4 +395,5 @@ leaveRoomButton.addEventListener('click', () => {
 restoreIdentity();
 roomCodeInput.value = getSavedRoomId();
 renderBoard();
+renderChat();
 connect();
