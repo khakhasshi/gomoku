@@ -27,6 +27,12 @@ const state = {
   connected: false
 };
 
+function triggerHaptics(duration = 10) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    navigator.vibrate(duration);
+  }
+}
+
 function showToast(message) {
   toast.textContent = message;
   toast.classList.add('show');
@@ -69,8 +75,25 @@ function renderBoard() {
       }
       cell.type = 'button';
       cell.setAttribute('aria-label', `第 ${row + 1} 行，第 ${col + 1} 列`);
+      cell.addEventListener('pointerdown', (event) => {
+        if (event.pointerType !== 'mouse' && !stone && canPlay) {
+          cell.classList.add('touch-active');
+        }
+      });
+      cell.addEventListener('pointerup', () => {
+        cell.classList.remove('touch-active');
+      });
+      cell.addEventListener('pointercancel', () => {
+        cell.classList.remove('touch-active');
+      });
+      cell.addEventListener('pointerleave', () => {
+        cell.classList.remove('touch-active');
+      });
       cell.addEventListener('click', () => {
         if (!stone) {
+          if (canPlay) {
+            triggerHaptics(12);
+          }
           send('game:move', { row, col });
         }
       });
@@ -169,6 +192,7 @@ function connect() {
 }
 
 createRoomButton.addEventListener('click', () => {
+  triggerHaptics(8);
   send('room:create', { name: getDisplayName() });
 });
 
@@ -178,6 +202,7 @@ joinRoomButton.addEventListener('click', () => {
     showToast('请输入房间号');
     return;
   }
+  triggerHaptics(8);
   send('room:join', { roomId, name: getDisplayName() });
 });
 
@@ -196,10 +221,12 @@ copyRoomButton.addEventListener('click', async () => {
 });
 
 rematchButton.addEventListener('click', () => {
+  triggerHaptics(8);
   send('game:rematch');
 });
 
 leaveRoomButton.addEventListener('click', () => {
+  triggerHaptics(8);
   send('room:leave');
 });
 
