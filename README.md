@@ -64,5 +64,5 @@ sudo ./deploy-ubuntu-nginx.sh
 - 安装 Node.js、npm、nginx
 - 执行 `npm install`
 - 生成 `systemd` 服务运行本项目
-- 让应用在 `127.0.0.1:7005` 运行
+- 优先让应用在 `127.0.0.1:7005` 运行，若被占用则自动选择空闲内部端口
 - 让 nginx 对公网监听 `7004` 并转发 WebSocket/HTTP 流量

@@ -5,11 +5,36 @@ APP_NAME="gomoku-online"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_USER="${SUDO_USER:-$USER}"
 PUBLIC_PORT="7004"
-APP_PORT="7005"
+APP_PORT_START="7005"
+APP_PORT="${APP_PORT_START}"
 SYSTEMD_SERVICE="${APP_NAME}.service"
 NGINX_SITE="${APP_NAME}.conf"
 NODE_BIN="$(command -v node || true)"
 NPM_BIN="$(command -v npm || true)"
+
+is_port_in_use() {
+  local port="$1"
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"
+    return
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return
+  fi
+
+  return 1
+}
+
+pick_free_app_port() {
+  local port="$APP_PORT_START"
+  while is_port_in_use "$port"; do
+    port="$((port + 1))"
+  done
+  APP_PORT="$port"
+}
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "请使用 sudo 运行：sudo ./deploy-ubuntu-nginx.sh"
@@ -19,7 +44,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y curl ca-certificates gnupg nginx
+apt-get install -y curl ca-certificates gnupg nginx lsof
 
 if ! command -v node >/dev/null 2>&1; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -37,6 +62,13 @@ if [[ ! -f package.json ]]; then
 fi
 
 sudo -u "$APP_USER" "$NPM_BIN" install --cache "$PROJECT_DIR/.npm-cache"
+
+if systemctl list-unit-files | grep -q "^${SYSTEMD_SERVICE}"; then
+  systemctl stop ${SYSTEMD_SERVICE} || true
+  systemctl reset-failed ${SYSTEMD_SERVICE} || true
+fi
+
+pick_free_app_port
 
 mkdir -p /etc/gomoku-online
 cat >/etc/gomoku-online/env <<EOF
@@ -102,5 +134,8 @@ fi
 echo "部署完成。"
 echo "公网访问端口：${PUBLIC_PORT}"
 echo "应用内部端口：${APP_PORT}"
+if [[ "${APP_PORT}" != "${APP_PORT_START}" ]]; then
+  echo "注意：默认内部端口 ${APP_PORT_START} 已被占用，已自动切换到 ${APP_PORT}。"
+fi
 echo "检查服务状态：systemctl status ${SYSTEMD_SERVICE} --no-pager"
 echo "检查 nginx 状态：systemctl status nginx --no-pager"
