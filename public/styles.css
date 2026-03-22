@@ -281,7 +281,12 @@ button:active {
   align-items: center;
   justify-content: center;
   padding: 0;
+  min-height: 0;
+  border-radius: 0;
   background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1 1 auto;
 }
 
 .cell:nth-child(15n + 1) {
@@ -463,7 +468,7 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  button,
+  button:not(.cell),
   input,
   select {
     min-height: 50px;
