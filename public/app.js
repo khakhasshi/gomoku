@@ -13,6 +13,10 @@ const blackPlayer = document.getElementById('blackPlayer');
 const whitePlayer = document.getElementById('whitePlayer');
 const turnDisplay = document.getElementById('turnDisplay');
 const toast = document.getElementById('toast');
+const STORAGE_KEYS = {
+  identity: 'gomoku.identity',
+  roomId: 'gomoku.roomId'
+};
 
 const PLAYER_CONFIG = {
   black: { label: '江景哲', color: '藏青色' },
@@ -24,8 +28,25 @@ const state = {
   clientId: null,
   room: null,
   ws: null,
-  connected: false
+  connected: false,
+  reconnectAttempted: false
 };
+
+function saveIdentity() {
+  localStorage.setItem(STORAGE_KEYS.identity, getDisplayName());
+}
+
+function saveRoomId(roomId) {
+  if (roomId) {
+    localStorage.setItem(STORAGE_KEYS.roomId, roomId);
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.roomId);
+  }
+}
+
+function getSavedRoomId() {
+  return localStorage.getItem(STORAGE_KEYS.roomId) || '';
+}
 
 function triggerHaptics(duration = 10) {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -53,6 +74,23 @@ function send(type, payload = {}) {
 
 function getDisplayName() {
   return playerNameInput.value.trim() === '易诗雨' ? '易诗雨' : '江景哲';
+}
+
+function restoreIdentity() {
+  const savedIdentity = localStorage.getItem(STORAGE_KEYS.identity);
+  if (savedIdentity === '易诗雨' || savedIdentity === '江景哲') {
+    playerNameInput.value = savedIdentity;
+  }
+}
+
+function tryReconnectRoom() {
+  const roomId = getSavedRoomId().trim().toUpperCase();
+  if (!roomId || !state.ws || state.ws.readyState !== WebSocket.OPEN || state.reconnectAttempted) {
+    return;
+  }
+
+  state.reconnectAttempted = true;
+  send('room:reconnect', { roomId, name: getDisplayName() });
 }
 
 function getMyPlayer() {
@@ -110,6 +148,7 @@ function renderRoom() {
   const myPlayer = getMyPlayer();
 
   roomDisplay.textContent = room?.id || '未加入';
+  saveRoomId(room?.id || '');
   blackPlayer.textContent = black ? `${black.name}${black.id === state.clientId ? '（你）' : ''}` : '等待加入';
   whitePlayer.textContent = white ? `${white.name}${white.id === state.clientId ? '（你）' : ''}` : '等待加入';
 
@@ -120,6 +159,8 @@ function renderRoom() {
   } else if (room.status === 'finished') {
     const winner = room.players.find((player) => player.id === room.winner);
     turnDisplay.textContent = winner ? `${winner.name} 获胜` : '对局结束';
+  } else if (room.status === 'paused') {
+    turnDisplay.textContent = '对手掉线，已暂停';
   } else if (room.status === 'waiting') {
     turnDisplay.textContent = '等待对手';
   } else {
@@ -132,9 +173,11 @@ function renderRoom() {
   roomCodeInput.value = room?.id || roomCodeInput.value.trim().toUpperCase();
 
   if (myPlayer) {
-    messageDisplay.textContent = room?.status === 'playing'
-      ? (room.turn === myPlayer.stone ? '轮到你落子' : `等待${myPlayer.stone === 'black' ? '易诗雨' : '江景哲'}落子`)
-      : messageDisplay.textContent;
+    if (room?.status === 'playing') {
+      messageDisplay.textContent = room.turn === myPlayer.stone ? '轮到你落子' : `等待${myPlayer.stone === 'black' ? '易诗雨' : '江景哲'}落子`;
+    } else if (room?.status === 'paused') {
+      messageDisplay.textContent = '对方网络波动，系统正在保留房间等待重连';
+    }
   }
 
   renderBoard();
@@ -147,6 +190,7 @@ function connect() {
 
   ws.addEventListener('open', () => {
     state.connected = true;
+    state.reconnectAttempted = false;
     connectionStatus.textContent = '已连接';
     showToast('已连接专属对战服务器');
   });
@@ -165,6 +209,7 @@ function connect() {
       state.clientId = payload.clientId;
       state.boardSize = payload.boardSize;
       renderBoard();
+      tryReconnectRoom();
       return;
     }
 
@@ -180,6 +225,7 @@ function connect() {
 
     if (type === 'room:reset') {
       state.room = null;
+      saveRoomId('');
       messageDisplay.textContent = '你已离开房间';
       renderRoom();
       return;
@@ -191,7 +237,12 @@ function connect() {
   });
 }
 
+playerNameInput.addEventListener('change', () => {
+  saveIdentity();
+});
+
 createRoomButton.addEventListener('click', () => {
+  saveIdentity();
   triggerHaptics(8);
   send('room:create', { name: getDisplayName() });
 });
@@ -202,6 +253,7 @@ joinRoomButton.addEventListener('click', () => {
     showToast('请输入房间号');
     return;
   }
+  saveIdentity();
   triggerHaptics(8);
   send('room:join', { roomId, name: getDisplayName() });
 });
@@ -230,5 +282,7 @@ leaveRoomButton.addEventListener('click', () => {
   send('room:leave');
 });
 
+restoreIdentity();
+roomCodeInput.value = getSavedRoomId();
 renderBoard();
 connect();

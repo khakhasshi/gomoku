@@ -8,6 +8,7 @@ const PORT = Number(process.env.PORT || 7004);
 const HOST = process.env.HOST || '0.0.0.0';
 const BOARD_SIZE = 15;
 const ROOM_ID_LENGTH = 6;
+const RECONNECT_GRACE_MS = 30000;
 const PLAYER_NAMES = {
   jiang: '江景哲',
   yi: '易诗雨'
@@ -63,7 +64,15 @@ function createRoom(hostSocket, hostName) {
     id: roomId,
     board: createEmptyBoard(),
     players: [
-      { socket: hostSocket, id: clients.get(hostSocket).id, name: hostName, stone: 'black' }
+      {
+        socket: hostSocket,
+        id: clients.get(hostSocket).id,
+        name: hostName,
+        stone: 'black',
+        connected: true,
+        disconnectTimer: null,
+        disconnectedAt: null
+      }
     ],
     status: 'waiting',
     turn: 'black',
@@ -90,19 +99,24 @@ function serializeRoom(room) {
     players: room.players.map((player) => ({
       id: player.id,
       name: player.name,
-      stone: player.stone
+      stone: player.stone,
+      connected: player.connected !== false
     }))
   };
 }
 
 function send(socket, type, payload = {}) {
-  if (socket.readyState === socket.OPEN) {
+  if (socket && socket.readyState === 1) {
     socket.send(JSON.stringify({ type, payload }));
   }
 }
 
 function broadcastRoom(room, type, payload = {}) {
-  room.players.forEach((player) => send(player.socket, type, payload));
+  room.players.forEach((player) => {
+    if (player.connected !== false) {
+      send(player.socket, type, payload);
+    }
+  });
 }
 
 function findPlayer(room, socket) {
@@ -111,6 +125,88 @@ function findPlayer(room, socket) {
 
 function getOpponent(room, socket) {
   return room.players.find((player) => player.socket !== socket);
+}
+
+function getOpponentByPlayer(room, player) {
+  return room.players.find((candidate) => candidate !== player);
+}
+
+function updateRoomStatusForConnections(room) {
+  const connectedPlayers = room.players.filter((player) => player.connected !== false);
+
+  if (room.winner || room.status === 'finished') {
+    return;
+  }
+
+  if (room.players.length < 2) {
+    room.status = 'waiting';
+    return;
+  }
+
+  room.status = connectedPlayers.length === 2 ? 'playing' : 'paused';
+}
+
+function clearDisconnectTimer(player) {
+  if (player?.disconnectTimer) {
+    clearTimeout(player.disconnectTimer);
+    player.disconnectTimer = null;
+  }
+}
+
+function removePlayerFromRoom(room, player, message) {
+  clearDisconnectTimer(player);
+  room.players = room.players.filter((candidate) => candidate !== player);
+
+  if (room.players.length === 0) {
+    rooms.delete(room.id);
+    return;
+  }
+
+  room.players.forEach((remainingPlayer) => {
+    remainingPlayer.stone = getPreferredStone(remainingPlayer.name);
+    remainingPlayer.connected = remainingPlayer.connected !== false;
+  });
+
+  room.status = 'waiting';
+  room.winner = null;
+  room.turn = 'black';
+  room.board = createEmptyBoard();
+  room.moves = [];
+  room.rematchVotes.clear();
+  notifyRoomState(room, message);
+}
+
+function markPlayerDisconnected(room, player) {
+  if (!player) {
+    return;
+  }
+
+  player.connected = false;
+  player.socket = null;
+  player.disconnectedAt = Date.now();
+  clearDisconnectTimer(player);
+
+  updateRoomStatusForConnections(room);
+  const opponent = getOpponentByPlayer(room, player);
+  if (opponent) {
+    notifyRoomState(room, `${player.name} 连接中断，已为其保留房间 30 秒。`);
+  }
+
+  player.disconnectTimer = setTimeout(() => {
+    removePlayerFromRoom(room, player, `${player.name} 超时未重连，房间已重置等待新对手。`);
+  }, RECONNECT_GRACE_MS);
+}
+
+function reattachPlayer(room, player, socket) {
+  clearDisconnectTimer(player);
+  player.socket = socket;
+  player.id = clients.get(socket).id;
+  player.connected = true;
+  player.disconnectedAt = null;
+  clients.get(socket).roomId = room.id;
+  clients.get(socket).name = player.name;
+  updateRoomStatusForConnections(room);
+  notifyRoomState(room, `${player.name} 已重新连接。`);
 }
 
 function countDirection(board, row, col, rowStep, colStep, stone) {
@@ -150,7 +246,9 @@ function hasFiveInRow(board, row, col, stone) {
 
 function resetRoom(room) {
   room.board = createEmptyBoard();
-  room.status = room.players.length === 2 ? 'playing' : 'waiting';
+  room.status = room.players.length === 2 && room.players.every((player) => player.connected !== false)
+    ? 'playing'
+    : room.players.length === 2 ? 'paused' : 'waiting';
   room.turn = 'black';
   room.winner = null;
   room.moves = [];
@@ -164,7 +262,7 @@ function notifyRoomState(room, message) {
   });
 }
 
-function leaveRoom(socket, silent = false) {
+function leaveRoom(socket, silent = false, permanent = true) {
   const client = clients.get(socket);
   if (!client || !client.roomId) {
     return;
@@ -178,7 +276,17 @@ function leaveRoom(socket, silent = false) {
   }
 
   const leavingPlayer = findPlayer(room, socket);
-  room.players = room.players.filter((player) => player.socket !== socket);
+  if (!leavingPlayer) {
+    client.roomId = null;
+    return;
+  }
+
+  if (!permanent) {
+    markPlayerDisconnected(room, leavingPlayer);
+    return;
+  }
+
+  room.players = room.players.filter((player) => player !== leavingPlayer);
 
   if (room.players.length === 0) {
     rooms.delete(room.id);
@@ -192,10 +300,11 @@ function leaveRoom(socket, silent = false) {
   room.moves = [];
   room.rematchVotes.clear();
 
-  const remaining = room.players[0];
-  if (remaining) {
+  room.players.forEach((remaining) => {
     remaining.stone = getPreferredStone(remaining.name);
-  }
+    clearDisconnectTimer(remaining);
+    remaining.connected = remaining.connected !== false;
+  });
 
   if (!silent) {
     notifyRoomState(room, `${leavingPlayer ? leavingPlayer.name : '玩家'} 已离开房间，等待新对手加入。`);
@@ -252,13 +361,47 @@ wss.on('connection', (socket) => {
       leaveRoom(socket, true);
       client.name = playerName;
       client.roomId = roomId;
-      room.players.push({ socket, id: client.id, name: playerName, stone: getPreferredStone(playerName) });
+      room.players.push({
+        socket,
+        id: client.id,
+        name: playerName,
+        stone: getPreferredStone(playerName),
+        connected: true,
+        disconnectTimer: null,
+        disconnectedAt: null
+      });
       rebalanceRoomPlayers(room);
       room.status = 'playing';
       room.turn = 'black';
       room.winner = null;
       room.rematchVotes.clear();
       notifyRoomState(room, `${playerName} 已加入，江景哲先手。`);
+      return;
+    }
+
+    if (type === 'room:reconnect') {
+      const roomId = String(payload.roomId || '').trim().toUpperCase();
+      const playerName = normalizePlayerName(payload.name);
+      const room = rooms.get(roomId);
+
+      if (!room) {
+        send(socket, 'room:reset');
+        return;
+      }
+
+      const existingPlayer = room.players.find((player) => player.name === playerName);
+      if (!existingPlayer) {
+        send(socket, 'room:reset');
+        return;
+      }
+
+      if (existingPlayer.connected && existingPlayer.socket && existingPlayer.socket !== socket) {
+        send(socket, 'system:error', { message: `${playerName} 当前已在线。` });
+        return;
+      }
+
+      leaveRoom(socket, true);
+      reattachPlayer(room, existingPlayer, socket);
       return;
     }
 
@@ -344,7 +487,7 @@ wss.on('connection', (socket) => {
   });
 
   socket.on('close', () => {
-    leaveRoom(socket);
+    leaveRoom(socket, true, false);
     clients.delete(socket);
   });
 });
