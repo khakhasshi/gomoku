@@ -97,10 +97,15 @@ function getMyPlayer() {
   return state.room?.players?.find((player) => player.id === state.clientId) || null;
 }
 
+function getLastMove() {
+  return state.room?.moves?.length ? state.room.moves[state.room.moves.length - 1] : null;
+}
+
 function renderBoard() {
   boardElement.innerHTML = '';
   const myPlayer = getMyPlayer();
   const canPlay = state.room?.status === 'playing' && myPlayer && state.room.turn === myPlayer.stone;
+  const lastMove = getLastMove();
 
   for (let row = 0; row < state.boardSize; row += 1) {
     for (let col = 0; col < state.boardSize; col += 1) {
@@ -108,6 +113,12 @@ function renderBoard() {
       const stone = state.room?.board?.[row]?.[col] || null;
 
       cell.className = `cell ${stone || ''}`.trim();
+      if (lastMove && lastMove.row === row && lastMove.col === col) {
+        cell.classList.add('last-move');
+        if (lastMove.timestamp) {
+          cell.title = `最后一步：${lastMove.playerName} · ${new Date(lastMove.timestamp).toLocaleString()}`;
+        }
+      }
       if (!stone && canPlay) {
         cell.classList.add('playable');
       }

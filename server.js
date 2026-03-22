@@ -23,6 +23,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 const rooms = new Map();
 const clients = new Map();
 
+function formatTimestamp(date = new Date()) {
+  return date.toISOString();
+}
+
+function logMove(room, player, row, col, stone, timestamp) {
+  console.log(`[${timestamp}] room=${room.id} player=${player.name} stone=${stone} move=(${row},${col}) totalMoves=${room.moves.length + 1}`);
+}
+
 function normalizePlayerName(name) {
   const trimmed = String(name || '').trim();
   if (trimmed === PLAYER_NAMES.yi) {
@@ -447,8 +455,10 @@ wss.on('connection', (socket) => {
         return;
       }
 
+      const moveTimestamp = formatTimestamp();
       room.board[row][col] = currentPlayer.stone;
-      room.moves.push({ row, col, stone: currentPlayer.stone, playerName: currentPlayer.name });
+      logMove(room, currentPlayer, row, col, currentPlayer.stone, moveTimestamp);
+      room.moves.push({ row, col, stone: currentPlayer.stone, playerName: currentPlayer.name, timestamp: moveTimestamp });
 
       if (hasFiveInRow(room.board, row, col, currentPlayer.stone)) {
         room.status = 'finished';
